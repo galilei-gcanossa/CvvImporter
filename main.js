@@ -1,4 +1,3 @@
-
 function doGet(e){
   return HtmlService
       .createTemplateFromFile('Index')
@@ -45,42 +44,62 @@ function importNewCourses(formParams){
 
     const studentsCache = {};
 
-    courses.map(p => {
-      const students = cvvClient.getStudents(p.classId);
+    courses.map(cvvCourse => {
+      const students = cvvClient.getStudents(cvvCourse.classId);
 
       trackedOp.addSteps(students.length);
       trackedOp.commitStatus();
       
-      trackedOp.logInfo(`Found ${students.length} students for the course: ${p.section} - ${p.subject}`);
+      trackedOp.logInfo(`Found ${students.length} students for the course: ${cvvCourse.section} - ${cvvCourse.subject}`);
 
-      const sectionFolder = getOrCreateFolder_(schoolYearFolder, p.section);
+      const sectionFolder = getOrCreateFolder_(schoolYearFolder, cvvCourse.section);
 
       const course = Classroom.newCourse()
-      course.name = p.subject;
-      course.section = p.section;
+      course.name = cvvCourse.subject;
+      course.section = cvvCourse.section;
       course.ownerId = "me";
       let  createdCourse = course;
+      trackedOp.logInfo(`Preparing course (${createdCourse.id}) ${createdCourse.section} - ${createdCourse.name}`);
 
       if(!formParams.testMode){
-        let  createdCourse = Classroom.Courses.create(course);
-        createdCourse = Classroom.Courses.get(createdCourse.id);
+        let existingCourses = Classroom.Courses.list({
+          teacherId: "me",
+          courseStates:["ACTIVE", "PROVISIONED", "DECLINED"]
+        });
+        existingCourses = (existingCourses.courses||[]).filter(t => t.name == cvvCourse.subject && t.section == cvvCourse.section);
+        
+        if(existingCourses.length==0){
+          createdCourse = Classroom.Courses.create(course);
+          createdCourse = Classroom.Courses.get(createdCourse.id);
 
-        rollbackQueue.push(()=>archiveAndDeleteCourse_(createdCourse));
+          rollbackQueue.push(()=>archiveAndDeleteCourse_(createdCourse));
 
-        const folder = DriveApp.getFolderById(createdCourse.teacherFolder.id);
-        folder.moveTo(sectionFolder);
-        //TODO: evaluate if needed: folder.setName(course.name);
+          Utilities.sleep(1000);
+          try{
+            const folder = DriveApp.getFolderById(createdCourse.teacherFolder.id);
+            folder.moveTo(sectionFolder);
+            //TODO: evaluate if needed: folder.setName(course.name);
+          }
+          catch(ex){
+            trackedOp.logError(`Unable to move folder of the course ${createdCourse.name} to ${sectionFolder.getName()}. Proceed by hand.`)
+          }
+
+          trackedOp.logInfo(`Created course (${createdCourse.id}) ${createdCourse.section} - ${createdCourse.name}`);
+        }
+        else{
+          createdCourse = existingCourses[0];
+          trackedOp.logInfo(`Course (${createdCourse.id}) ${createdCourse.section} - ${createdCourse.name} already present.`);
+        }
       }
 
       trackedOp.markSteps(1);
       
-      trackedOp.logInfo(`Created course (${createdCourse.id}) ${createdCourse.section} - ${createdCourse.name}`);
       trackedOp.commitStatus();
 
-      students.map((s, sIndex) => {
+      students.map((cvvStudent, sIndex) => {
 
         let searchResults=[];
-        if(!studentsCache[course.section] || !studentsCache[course.section][s.nameString]) {
+        if(!studentsCache[course.section] || !studentsCache[course.section][cvvStudent.nameString]) {
           let people = {people:[]};
           let retryTime = 0;
           let retrySleepTime = 500;
@@ -88,7 +107,7 @@ function importNewCourses(formParams){
           do{
             try{
               people = People.People.searchDirectoryPeople({
-                query: s.nameString,
+                query: cvvStudent.nameString,
                 readMask: "emailAddresses",
                 sources: ["DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE"]
               });
@@ -111,31 +130,42 @@ function importNewCourses(formParams){
           if(!studentsCache[course.section])
             studentsCache[course.section]={};
 
-          studentsCache[course.section][s.nameString] = people.people;
+          studentsCache[course.section][cvvStudent.nameString] = people.people || [];
         }
         
-        searchResults = studentsCache[course.section][s.nameString]
+        searchResults = studentsCache[course.section][cvvStudent.nameString]
         
         if(searchResults.length==0){
-          trackedOp.logWarn(`No profile found for ${s.nameString}`);
+          trackedOp.logWarn(`No profile found for ${cvvStudent.nameString}`);
         }
         else if(searchResults.length>1){
           const joinedEmails = searchResults.map(p => p.emailAddresses[0].value).join(", ");
-          trackedOp.logWarn(`More than one profile found for ${s.nameString}: ${joinedEmails}. Unable to invite to ${createdCourse.section} - ${createdCourse.name}`);
+          trackedOp.logWarn(`More than one profile found for ${cvvStudent.nameString}: ${joinedEmails}. Unable to invite to ${createdCourse.section} - ${createdCourse.name}`);
         }
         else {
           const userEmail = searchResults[0].emailAddresses[0].value
-          trackedOp.logInfo(`Created invitation for ${userEmail} to the course ${createdCourse.id}`);
+          trackedOp.logInfo(`Preparing invitation for ${userEmail} to the course ${createdCourse.id}`);
 
           if (!formParams.testMode){
-            const invitation = Classroom.newInvitation();
-            invitation.courseId = createdCourse.id;
-            invitation.userId = userEmail;
-            invitation.role = "STUDENT";
-            
-            const invitationSent = Classroom.Invitations.create(invitation);
+            const existingInvitations = Classroom.Invitations.list({
+              courseId:createdCourse.id, 
+              userId: userEmail
+            });
 
-            rollbackQueue.push(()=>Classroom.Invitations.remove(invitationSent.id));
+            if(existingInvitations.invitations && existingInvitations.invitations.filter(p => p.role == "STUDENT").length == 0){
+              const invitation = Classroom.newInvitation();
+              invitation.courseId = createdCourse.id;
+              invitation.userId = userEmail;
+              invitation.role = "STUDENT";
+              
+              const invitationSent = Classroom.Invitations.create(invitation);
+
+              rollbackQueue.push(()=>Classroom.Invitations.remove(invitationSent.id));
+              trackedOp.logInfo(`Created invitation for ${userEmail} to the course ${createdCourse.id}`);
+            }
+            else {
+              trackedOp.logInfo(`Invitation for ${userEmail} to the course ${createdCourse.id} already sent.`);
+            }
           }
 
           trackedOp.markSteps(1);
