@@ -1,0 +1,288 @@
+<?
+  const date = new Date();
+  let schoolYearPlaceholder = date.getMonth() > 0 && date.getMonth() < 8 ? `${date.getFullYear()-1}/${date.getFullYear()}` : `${date.getFullYear()}/${date.getFullYear()+1}`;
+?>
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+
+    <script>
+
+      function renderProgress(status, first){
+
+        const ctx = document.querySelector("#operationProgress");
+        const prgBar = ctx.querySelector(".progress-bar");
+        const logsInfo = ctx.querySelector("#logs-info .card-body");
+        const logsInfoHeading = ctx.querySelector("#logs-info .card-header");
+
+        if(first){
+          logsInfo.innerHTML = "";
+        }
+
+        ctx.classList.remove("d-none");
+        
+        if(!status)
+          return;
+
+        prgBar.ariaValueMax = status.progress.total;
+        prgBar.ariaValueNow = status.progress.count;
+        prgBar.style.width=`${status.progress.count*100/status.progress.total}%`;
+        prgBar.innerHTML = `${status.progress.count}/${status.progress.total}`;
+
+        logsInfo.innerHTML="";
+
+        status.logs.map(log => {
+          const alertBox = document.createElement("div");
+          alertBox.classList.add("alert");
+          alertBox.classList.add(`__${log.type}`);
+
+          if(log.type=="info")
+            alertBox.classList.add("alert-info");
+          else if(log.type=="warn")
+            alertBox.classList.add("alert-warning");
+          else if(log.type=="error")
+            alertBox.classList.add("alert-danger");
+
+          let txt = log.text;
+          if(log.args){
+            let matches;
+            while(matches = /{([^}]+)}/g.exec(txt)){
+              txt = txt.replace(matches[0], log.args[matches[1]] || "");
+            }
+          }
+
+          alertBox.innerHTML = `[${new Date(log.datetime).toISOString()}] ${txt}`;
+
+          logsInfo.append(alertBox);
+        });
+
+        logsInfoHeading.querySelector(".filters .info").innerHTML = `${status.logs.filter(t=>t.type=="info").length} Info`;
+        logsInfoHeading.querySelector(".filters .warn").innerHTML = `${status.logs.filter(t=>t.type=="warn").length} Warnings`;
+        logsInfoHeading.querySelector(".filters .error").innerHTML = `${status.logs.filter(t=>t.type=="error").length} Errors`;
+      }
+
+      function filterLogs(type){
+        const logsInfo = document.querySelector("#logs-info .card-body");
+        
+        if(type == "info"){
+          logsInfo.querySelectorAll(".alert").forEach(item => {
+            if(item.classList.contains("__info"))
+              item.classList.remove("d-none");
+            else
+              item.classList.add("d-none");
+          });
+        }
+        else if(type == "warn"){
+          logsInfo.querySelectorAll(".alert").forEach(item => {
+            if(item.classList.contains("__warn"))
+              item.classList.remove("d-none");
+            else
+              item.classList.add("d-none");
+          });
+        }
+        else if(type == "error"){
+          logsInfo.querySelectorAll(".alert").forEach(item => {
+            if(item.classList.contains("__error"))
+              item.classList.remove("d-none");
+            else
+              item.classList.add("d-none");
+          });
+        }
+        else {
+          logsInfo.querySelectorAll(".alert").forEach(item => {
+            item.classList.remove("d-none");
+          });
+        }
+      }
+
+      function setError(message){
+        const status = document.querySelector("#import-status");
+        status.innerHTML = message;
+        status.classList.add("alert-danger");
+        status.classList.remove("d-none");
+      }
+
+      function setSuccess(message){
+        const status = document.querySelector("#import-status");
+        status.innerHTML = message;
+        status.classList.add("alert-success");
+        status.classList.remove("d-none");
+      }
+
+      function clearStatus(message){
+        const status = document.querySelector("#import-status");
+        status.innerHTML = "";
+        status.classList.remove("alert-danger");
+        status.classList.remove("alert-success");
+        status.classList.add("d-none");
+      }
+
+      function fetchAndUpdateStatus(operationId){
+        google.script.run
+        .withSuccessHandler(result => { 
+          renderProgress(result);
+        })
+        .getImportNewCoursesProgress(operationId);
+      }
+
+      function startImport(form){
+        const button = form.querySelector("button[type=submit]");
+        const text = button.querySelector(".text");
+        const spinner = button.querySelector(".spinner-border");
+
+        button.disabled=true;
+        text.classList.add("visually-hidden");
+        spinner.classList.remove("visually-hidden");
+
+        const status = {
+          logs:[],
+          progress: {
+            count:0,
+            total:120,
+            completed: false
+          }
+        };
+
+        clearStatus();
+
+        const formData = Array.from(form.querySelectorAll("input")).reduce((acc, p) => {
+          acc[p.id]=p.value;
+          return acc;
+        }, {});
+        formData.operationId = new Date().getTime();
+        formData.testMode = document.querySelector("#testModeSwitch").checked;
+
+        const hdl = setInterval(()=> {
+          fetchAndUpdateStatus(formData.operationId);
+        }, 2000);
+
+        const result = google.script.run
+        .withSuccessHandler(p => { 
+          clearInterval(hdl);
+
+          renderProgress(p); 
+
+          text.classList.remove("visually-hidden");
+          spinner.classList.add("visually-hidden");
+          button.disabled=false;
+
+          setSuccess("Operation completed");
+        })
+        .withFailureHandler(p => { 
+          clearInterval(hdl);
+
+          fetchAndUpdateStatus(formData.operationId);
+
+          text.classList.remove("visually-hidden");
+          spinner.classList.add("visually-hidden");
+          button.disabled=false;
+
+          setError(!!p ? p.message || p : "Unknown error");
+        })
+        .importNewCourses(formData);
+
+        renderProgress(status, true);
+        
+      }
+    </script>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.0/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-KyZXEAg3QhqLMpG8r+8fhAXLRk2vvoC2f3B09zVXn8CA5QIVfZOJ3BCsw2P0p/We" crossorigin="anonymous">
+  </head>
+  <body>
+    
+    <div class="container mt-5">
+      <div class="row g-3 justify-content-center">
+        <div class="col-6">
+          <form class="row" onsubmit="event.preventDefault(); startImport(this)">
+            <div class="mb-3 row">
+              <div class="col">
+                <h3>Insert ClasseViva credentials</h3>
+
+                <div class="form-check form-switch">
+                  <input class="form-check-input" type="checkbox" id="testModeSwitch" checked
+                    onchange="this.parentElement.querySelector('label[for=testModeSwitch').innerHTML='Test mode'+(this.checked ? 'ON' : 'OFF')">
+                  <label class="form-check-label" for="testModeSwitch">Test mode ON</label>
+                </div>
+              </div>
+            </div>
+            <div class="mb-3 row">
+              <label for="username" class="col-3 col-form-label">Username</label>
+              <div class="col">
+                <input type="text" class="form-control" id="username" placeholder="email@galileiostiglia.edu.it">
+              </div>
+            </div>
+            <div class="mb-3 row">
+              <label for="password" class="col-3 col-form-label">Password</label>
+              <div class="col">
+                <input type="password" class="form-control" id="password" placeholder="Password">
+              </div>
+            </div>
+            <div class="mb-3 row">
+              <label for="schoolYear" class="col-3 col-form-label">School year</label>
+              <div class="col">
+                <input type="text" class="form-control" id="schoolYear" value="<?= schoolYearPlaceholder ?>">
+              </div>
+            </div>
+            <div class="mb-3 row justify-content-center">
+              <div class="col-6 text-center">
+                <button type="submit" class="btn btn-primary col-auto" style="min-width: 8rem;">
+                  <span class="spinner-border spinner-border-sm visually-hidden" role="status" aria-hidden="true"></span>
+                  <span class="text">Importa</span>
+                </button>
+              </div>
+            </div>
+          </form>
+          <div id="import-status" class="alert">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="operationProgress" class="container-fluid d-none">
+      <div class="row justify-content-center">
+        <div class="col-10">
+          <div class="row justify-content-center mt-5 mb-3">
+            <div class="col-10">
+              <hr />
+            </div>
+          </div>
+      
+          <div class="row justify-content-center mb-5">
+            <div class="col-8">
+              <div class="progress">
+                <div class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0/1</div>
+              </div>
+            </div>
+          </div>
+      
+          <div class="row justify-content-center mb-5">
+            <div class="col-10">
+              <div class="card" id="logs-info">
+                <div class="card-header">
+                  <div class="btn-group filters" role="group" aria-label="All">
+                    <input type="radio" class="btn-check" name="btnradio" id="btnradio1" autocomplete="off" checked>
+                    <label class="btn btn-outline-primary" style="min-width:8rem" for="btnradio1" onclick="filterLogs();">All</label>
+                  
+                    <input type="radio" class="btn-check" name="btnradio" id="btnradio2" autocomplete="off">
+                    <label class="btn btn-outline-primary info" style="min-width:8rem" for="btnradio2" onclick="filterLogs('info');"></label>
+                  
+                    <input type="radio" class="btn-check" name="btnradio" id="btnradio3" autocomplete="off">
+                    <label class="btn btn-outline-primary warn" style="min-width:8rem" for="btnradio3" onclick="filterLogs('warn');"></label>
+
+                    <input type="radio" class="btn-check" name="btnradio" id="btnradio4" autocomplete="off">
+                    <label class="btn btn-outline-primary error" style="min-width:8rem" for="btnradio4" onclick="filterLogs('error');"></label>
+                  </div>
+                </div>
+                <div class="card-body">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.0/dist/js/bootstrap.bundle.min.js" integrity="sha384-U1DAWAznBHeqEIlVSCgzq+c9gqGAJn5c/t99JyeKa9xxaYpSvHU5awsuZVVFIhvj" crossorigin="anonymous"></script>
+  </body>
+</html>

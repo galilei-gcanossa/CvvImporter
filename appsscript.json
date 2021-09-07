@@ -1,0 +1,30 @@
+{
+  "timeZone": "Europe/Rome",
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "dependencies": {
+    "enabledAdvancedServices": [
+      {
+        "userSymbol": "Classroom",
+        "serviceId": "classroom",
+        "version": "v1"
+      },
+      {
+        "userSymbol": "People",
+        "serviceId": "peopleapi",
+        "version": "v1"
+      }
+    ],
+    "libraries": [
+      {
+        "userSymbol": "CvvService",
+        "libraryId": "1o8H8-v_0SEpMod8XmtZCD51pDrix8e3bIlQHlnZAIu4b6-x_HjsArWUW",
+        "version": "3"
+      }
+    ]
+  },
+  "webapp": {
+    "executeAs": "USER_ACCESSING",
+    "access": "DOMAIN"
+  }
+}
