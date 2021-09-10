@@ -26,7 +26,7 @@ function importNewCourses(formParams){
 
   try
   {
-    const cvvClient = CvvService.Accounts.createOrUpdate(formParams.username, formParams.password).getClient();
+    const cvvClient = CvvService.Accounts.getCurrentActive("CvvImporter").getClient();
 
     const courses = cvvClient.getCourses();
     trackedOp.addSteps(courses.length);
