@@ -26,11 +26,7 @@ function importNewCourses(formParams){
 
   try
   {
-    const cvvClient = CvvService.clientFor(formParams.username);
-
-    if (!cvvClient.signedIn() && !cvvClient.signIn(formParams.username, formParams.password)){
-      throw new Error("Unable to login into Cvv");
-    }
+    const cvvClient = CvvService.Accounts.createOrUpdate(formParams.username, formParams.password).getClient();
 
     const courses = cvvClient.getCourses();
     trackedOp.addSteps(courses.length);
