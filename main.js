@@ -1,3 +1,5 @@
+const APP_NAME = "CvvImporter";
+
 function doGet(e){
   return HtmlService
       .createTemplateFromFile('Index')
@@ -14,26 +16,26 @@ function archiveOldCourses(){
 }
 
 function getImportNewCoursesProgress(operationId){
-  const trackedOp = OpsTracker.track(`ImportNewCourses:${operationId}`);
+  const trackedOp = CvvService.utils_getOperationTracker(`ImportNewCourses:${operationId}`);
   
-  return trackedOp.status;
+  return trackedOp.getStatus();
 }
 
 function importNewCourses(formParams){
 
   const rollbackQueue=[];
-  const trackedOp = OpsTracker.track(`ImportNewCourses:${formParams.operationId}`);
+  const trackedOp = CvvService.utils_getOperationTracker(`ImportNewCourses:${formParams.operationId}`);
 
   try
   {
-    const cvvClient = CvvService.Accounts.getCurrentActive("CvvImporter").getClient();
+    const account = CvvService.account_getActive("CvvImporter");
 
-    const courses = cvvClient.getCourses();
+    const courses = CvvService.courses_get(account);
     trackedOp.addSteps(courses.length);
 
     trackedOp.logInfo(`Found ${courses.length} courses`);
 
-    trackedOp.commitStatus();
+    trackedOp.commit();
 
     const classroomFolder = getOrCreateFolder_(DriveApp.getRootFolder(), "Classroom");
     const schoolYearFolder = getOrCreateFolder_(classroomFolder, formParams.schoolYear);
@@ -41,10 +43,10 @@ function importNewCourses(formParams){
     const studentsCache = {};
 
     courses.map(cvvCourse => {
-      const students = cvvClient.getStudents(cvvCourse.classId);
+      const students = CvvService.courses_getStudents(account, cvvCourse.classId);
 
       trackedOp.addSteps(students.length);
-      trackedOp.commitStatus();
+      trackedOp.commit();
       
       trackedOp.logInfo(`Found ${students.length} students for the course: ${cvvCourse.section} - ${cvvCourse.subject}`);
 
@@ -90,7 +92,7 @@ function importNewCourses(formParams){
 
       trackedOp.markSteps(1);
       
-      trackedOp.commitStatus();
+      trackedOp.commit();
 
       students.map((cvvStudent, sIndex) => {
 
@@ -168,10 +170,10 @@ function importNewCourses(formParams){
         }
 
         if(sIndex%5==0)
-          trackedOp.commitStatus();
+          trackedOp.commit();
       });
 
-      trackedOp.commitStatus();
+      trackedOp.commit();
     });
 
     trackedOp.complete();
@@ -185,8 +187,8 @@ function importNewCourses(formParams){
   }
   finally {
     rollbackQueue.splice(0, rollbackQueue.length);
-    trackedOp.commitStatus(10);
+    trackedOp.commit(10);
   }
 
-  return trackedOp.status;
+  return trackedOp.getStatus();
 }
